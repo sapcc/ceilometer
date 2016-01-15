@@ -38,6 +38,10 @@ http_dispatcher_opts = [
                default=5,
                help='The max time in seconds to wait for a request to '
                     'timeout.'),
+    cfg.StrOpt('verify_ssl',
+               help='The path to a server certificate if the usual CAs '
+                    'are not used or if a self-signed certificate is used. '
+                    'Set to False to ignore certificate verification.'),
 ]
 
 cfg.CONF.register_opts(http_dispatcher_opts, group="dispatcher_http")
@@ -69,6 +73,10 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         self.target = self.conf.dispatcher_http.target
         self.event_target = (self.conf.dispatcher_http.event_target or
                              self.target)
+        self.verify_ssl = self.conf.dispatcher_http.verify_ssl
+        # Deal with the case where verify_ssl is set to a boolean or not set at all
+        if self.verify_ssl == 'False' or self.verify_ssl == 'True' or self.verify_ssl == '':
+            self.verify_ssl = (self.verify_ssl != 'False')
 
     def record_metering_data(self, data):
         if self.target == '':
@@ -97,6 +105,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     res = requests.post(self.target,
                                         data=json.dumps(meter),
                                         headers=self.headers,
+                                        verify=self.verify_ssl,
                                         timeout=self.timeout)
                     LOG.debug('Message posting finished with status code '
                               '%d.', res.status_code)
@@ -119,6 +128,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                 try:
                     res = requests.post(self.event_target, data=event,
                                         headers=self.headers,
+                                        verify=self.verify_ssl,
                                         timeout=self.timeout)
                     res.raise_for_status()
                 except Exception:
