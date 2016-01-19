@@ -81,7 +81,7 @@ class TestEventDispatcherHttp(base.BaseTestCase):
         self.CONF.dispatcher_http.event_target = 'fake'
         dispatcher = http.HttpDispatcher(self.CONF)
 
-        event = event_models.Event(uuid.uuid4(), 'test',
+        event = event_models.Event(repr(uuid.uuid4()), 'test',
                                    datetime.datetime(2012, 7, 2, 13, 53, 40),
                                    [], {})
         event = utils.message_from_event(event,
@@ -96,7 +96,7 @@ class TestEventDispatcherHttp(base.BaseTestCase):
         self.CONF.dispatcher_http.event_target = ''
         dispatcher = http.HttpDispatcher(self.CONF)
 
-        event = event_models.Event(uuid.uuid4(), 'test',
+        event = event_models.Event(repr(uuid.uuid4()), 'test',
                                    datetime.datetime(2012, 7, 2, 13, 53, 40),
                                    [], {})
         event = utils.message_from_event(event,
@@ -110,7 +110,7 @@ class TestEventDispatcherHttp(base.BaseTestCase):
         self.CONF.dispatcher_http.target = 'fake'
         dispatcher = http.HttpDispatcher(self.CONF)
 
-        event = event_models.Event(uuid.uuid4(), 'test',
+        event = event_models.Event(repr(uuid.uuid4()), 'test',
                                    datetime.datetime(2012, 7, 2, 13, 53, 40),
                                    [], {})
         event = utils.message_from_event(event,
