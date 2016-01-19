@@ -102,12 +102,13 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     meter, self.conf.publisher.telemetry_secret):
                 try:
                     # Every meter should be posted to the target
+                    LOG.debug('Event Message: %s ', json.dumps(meter))
                     res = requests.post(self.target,
                                         data=json.dumps(meter),
                                         headers=self.headers,
                                         verify=self.verify_ssl,
                                         timeout=self.timeout)
-                    LOG.debug('Message posting finished with status code '
+                    LOG.debug('Meter Message posting finished with status code '
                               '%d.', res.status_code)
                 except Exception as err:
                     LOG.exception(_('Failed to record metering data: %s'),
@@ -126,10 +127,13 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     event, self.conf.publisher.telemetry_secret):
                 res = None
                 try:
-                    res = requests.post(self.event_target, data=event,
+                    LOG.debug('Event Message: %s ', json.dumps(event))
+                    res = requests.post(self.event_target, data=json.dumps(event),
                                         headers=self.headers,
                                         verify=self.verify_ssl,
                                         timeout=self.timeout)
+                    LOG.debug('Event Message posting finished with status code '
+                              '%d.', res.status_code)
                     res.raise_for_status()
                 except Exception:
                     error_code = res.status_code if res else 'unknown'
