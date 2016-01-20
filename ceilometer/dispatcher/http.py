@@ -102,9 +102,10 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     meter, self.conf.publisher.telemetry_secret):
                 try:
                     # Every meter should be posted to the target
-                    LOG.debug('Event Message: %s ', json.dumps(meter))
+                    meter_json = json.dumps(meter)
+                    LOG.debug(_('Meter Message: %s '), meter_json)
                     res = requests.post(self.target,
-                                        data=json.dumps(meter),
+                                        data=meter_json,
                                         headers=self.headers,
                                         verify=self.verify_ssl,
                                         timeout=self.timeout)
@@ -127,8 +128,9 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     event, self.conf.publisher.telemetry_secret):
                 res = None
                 try:
-                    LOG.debug('Event Message: %s ', json.dumps(event))
-                    res = requests.post(self.event_target, data=json.dumps(event),
+                    event_json = json.dumps(event)
+                    LOG.debug(_('Event Message: %s '), event_json)
+                    res = requests.post(self.event_target, data=event_json,
                                         headers=self.headers,
                                         verify=self.verify_ssl,
                                         timeout=self.timeout)
