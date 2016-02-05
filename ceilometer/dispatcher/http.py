@@ -42,6 +42,10 @@ http_dispatcher_opts = [
                help='The path to a server certificate if the usual CAs '
                     'are not used or if a self-signed certificate is used. '
                     'Set to False to ignore certificate verification.'),
+    cfg.BoolOpt('microbatching',
+                default=False,
+                help='When we have a list of events or meters, send them '
+                'as a JSON list instead of as individual HTTP requests.'),
 ]
 
 cfg.CONF.register_opts(http_dispatcher_opts, group="dispatcher_http")
@@ -77,6 +81,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         # Deal with the case where verify_ssl is set to a boolean or not set at all
         if self.verify_ssl == 'False' or self.verify_ssl == 'True' or self.verify_ssl == '':
             self.verify_ssl = (self.verify_ssl != 'False')
+        self.microbatching = self.conf.dispatcher_http.microbatching
 
     def record_metering_data(self, data):
         if self.target == '':
@@ -90,6 +95,12 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         if not isinstance(data, list):
             data = [data]
 
+        LOG.debug('Meters to publish: '
+                  '%d ', len(data))
+
+        if self.microbatching:
+            batched_data = []
+
         for meter in data:
             LOG.debug(
                 'metering data %(counter_name)s '
@@ -100,48 +111,77 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                  'counter_volume': meter['counter_volume']})
             if publisher_utils.verify_signature(
                     meter, self.conf.publisher.telemetry_secret):
-                try:
+                if self.microbatching:
+                    batched_data.append(meter)
+                else:
                     # Every meter should be posted to the target
                     meter_json = json.dumps(meter)
-                    LOG.debug(_('Meter Message: %s '), meter_json)
-                    res = requests.post(self.target,
-                                        data=meter_json,
-                                        headers=self.headers,
-                                        verify=self.verify_ssl,
-                                        timeout=self.timeout)
-                    LOG.debug('Meter Message posting finished with status code '
-                              '%d.', res.status_code)
-                except Exception as err:
-                    LOG.exception(_('Failed to record metering data: %s'),
-                                  err)
+                    self.post_meter_json(meter_json)
             else:
                 LOG.warning(_(
                     'message signature invalid, discarding message: %r'),
                     meter)
 
+        if self.microbatching:
+            # Every meter should be posted to the target
+            meter_json = json.dumps(batched_data)
+            self.post_meter_json(meter_json)
+
+
+    def post_meter_json(self, meter_json):
+        try:
+            # Every meter should be posted to the target
+            LOG.debug(_('Meter Message: %s '), meter_json)
+            res = requests.post(self.target,
+                                data=meter_json,
+                                headers=self.headers,
+                                verify=self.verify_ssl,
+                                timeout=self.timeout)
+            LOG.debug('Meter Message posting finished with status code '
+                      '%d.', res.status_code)
+        except Exception as err:
+            LOG.exception(_('Failed to record metering data: %s'),
+                          err)
+
     def record_events(self, events):
         if not isinstance(events, list):
             events = [events]
 
+        LOG.debug('Events to publish: '
+                  '%d ', len(events))
+
+        if self.microbatching:
+            batched_data = []
+
         for event in events:
             if publisher_utils.verify_signature(
                     event, self.conf.publisher.telemetry_secret):
-                res = None
-                try:
+                if self.microbatching:
+                    batched_data.append(event)
+                else:
                     event_json = json.dumps(event)
-                    LOG.debug(_('Event Message: %s '), event_json)
-                    res = requests.post(self.event_target, data=event_json,
-                                        headers=self.headers,
-                                        verify=self.verify_ssl,
-                                        timeout=self.timeout)
-                    LOG.debug('Event Message posting finished with status code '
-                              '%d.', res.status_code)
-                    res.raise_for_status()
-                except Exception:
-                    error_code = res.status_code if res else 'unknown'
-                    LOG.exception(_LE('Status Code: %{code}s. Failed to'
-                                      'dispatch event: %{event}s'),
-                                  {'code': error_code, 'event': event})
+                    self.post_event_json(event_json)
             else:
                 LOG.warning(_LW(
                     'event signature invalid, discarding event: %s'), event)
+
+        if self.microbatching:
+            event_json = json.dumps(batched_data)
+            self.post_meter_json(event_json)
+
+    def post_event_json(self, event_json):
+        res = None
+        try:
+            LOG.debug(_('Event Message: %s '), event_json)
+            res = requests.post(self.event_target, data=event_json,
+                                headers=self.headers,
+                                verify=self.verify_ssl,
+                                timeout=self.timeout)
+            LOG.debug('Event Message posting finished with status code '
+                      '%d.', res.status_code)
+            res.raise_for_status()
+        except Exception:
+            error_code = res.status_code if res else 'unknown'
+            LOG.exception(_LE('Status Code: %{code}s. Failed to'
+                              'dispatch event: %{event}s'),
+                          {'code': error_code, 'event': event_json})
