@@ -19,7 +19,9 @@ from threading import Thread
 from Queue import Queue
 from oslo_config import cfg
 from oslo_log import log
+from Queue import Queue
 import requests
+from threading import Thread
 
 from ceilometer import dispatcher
 from ceilometer.i18n import _, _LE, _LW
@@ -101,8 +103,8 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         self.event_target = (self.conf.dispatcher_http.event_target or
                              self.target)
         self.verify_ssl = self.conf.dispatcher_http.verify_ssl
-        # Deal with the case where verify_ssl is set to a boolean or not set at all
-        if self.verify_ssl == 'False' or self.verify_ssl == 'True' or self.verify_ssl == '':
+        # Default verify_ssl to True if it's not set
+        if self.verify_ssl in ['False', 'True', '']:
             self.verify_ssl = (self.verify_ssl != 'False')
         # Settings for batch mode
         self.batch_mode = self.conf.dispatcher_http.batch_mode
@@ -110,9 +112,10 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
             LOG.debug(_('Set up and run batch mode'))
             HttpDispatcher.meter_queue = Queue()
             HttpDispatcher.event_queue = Queue()
-            HttpDispatcher.batch_timer = BatchFlushThread(self.conf.dispatcher_http.batch_count,
-                                                          self.conf.dispatcher_http.batch_timeout,
-                                                          self.conf.dispatcher_http.batch_polling_interval)
+            HttpDispatcher.batch_timer = BatchFlushThread(
+                self.conf.dispatcher_http.batch_count,
+                self.conf.dispatcher_http.batch_timeout,
+                self.conf.dispatcher_http.batch_polling_interval)
             HttpDispatcher.batch_timer.start()
 
     def record_metering_data(self, data):
@@ -161,7 +164,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                       res.status_code)
             res.raise_for_status()
             return True
-        except Exception as err:
+        except Exception:
             error_code = res.status_code if res else 'unknown'
             LOG.exception(_LE('Status Code: %{code}s. Failed to'
                               'dispatch event: %{event}s'),
@@ -207,6 +210,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
 
 
 class BatchFlushThread(Thread):
+
     def __init__(self, batch_count, batch_timeout, batch_polling_interval):
         super(BatchFlushThread, self).__init__()
         self.batch_count = batch_count
@@ -231,8 +235,8 @@ class BatchFlushThread(Thread):
                 LOG.debug(_('Batch queue full, triggering batch publish.'))
                 return True
             else:
-                LOG.debug('Not flushing. Queue size: %d, elapsed time: %d '
-                          , queue.qsize(), elapsed_time)
+                LOG.debug('Not flushing. Queue size: %d, elapsed time: %d ',
+                          queue.qsize(), elapsed_time)
                 return False
 
     def run(self):
@@ -241,7 +245,8 @@ class BatchFlushThread(Thread):
         poster = None
 
         while True:
-            LOG.debug(_('Check meter queue to see if we are ready to flush a batch'))
+            LOG.debug(
+                _('Check meter queue to see if we are ready to flush a batch'))
             if self.is_batch_ready(HttpDispatcher.meter_queue):
                 # publish all meters in queue at this point
                 meters = []
@@ -258,7 +263,8 @@ class BatchFlushThread(Thread):
                         for meter in meters:
                             HttpDispatcher.meter_queue.put((poster, meter))
 
-            LOG.debug(_('Check event queue to see if we are ready to flush a batch'))
+            LOG.debug(
+                _('Check event queue to see if we are ready to flush a batch'))
             if self.is_batch_ready(HttpDispatcher.event_queue):
                 # publish all events in queue at this point
                 events = []
