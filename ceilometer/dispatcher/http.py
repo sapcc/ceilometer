@@ -13,7 +13,10 @@
 # under the License.
 
 import json
+import time
 
+from threading import Thread
+from Queue import Queue
 from oslo_config import cfg
 from oslo_log import log
 import requests
@@ -42,10 +45,20 @@ http_dispatcher_opts = [
                help='The path to a server certificate if the usual CAs '
                     'are not used or if a self-signed certificate is used. '
                     'Set to False to ignore certificate verification.'),
-    cfg.BoolOpt('microbatching',
+    cfg.BoolOpt('batch_mode',
                 default=False,
-                help='When we have a list of events or meters, send them '
-                'as a JSON list instead of as individual HTTP requests.'),
+                help='Indicates whether samples are'
+                     ' published in a batch.'),
+    cfg.IntOpt('batch_count',
+               default=1000,
+               help='Maximum number of samples in a batch.'),
+    cfg.IntOpt('batch_timeout',
+               default=15,
+               help='Maximum time interval(seconds) after which '
+                    'samples are published in a batch.'),
+    cfg.IntOpt('batch_polling_interval',
+               default=5,
+               help='Frequency of checking if batch criteria is met.'),
 ]
 
 cfg.CONF.register_opts(http_dispatcher_opts, group="dispatcher_http")
@@ -68,7 +81,17 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         target = www.example.com
         event_target = www.example.com
         timeout = 2
+
+    Instead of publishing events and meters as JSON objects in individual HTTP
+    requests, they can be batched up and published as JSON arrays of objects::
+
+        [dispatcher_http]
+        batch_mode = True
+        batch_count = 1000
+        batch_timeout = 15 # seconds
+        batch_polling_interval = 5 # seconds
     """
+    batch_timer = None
 
     def __init__(self, conf):
         super(HttpDispatcher, self).__init__(conf)
@@ -81,7 +104,16 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         # Deal with the case where verify_ssl is set to a boolean or not set at all
         if self.verify_ssl == 'False' or self.verify_ssl == 'True' or self.verify_ssl == '':
             self.verify_ssl = (self.verify_ssl != 'False')
-        self.microbatching = self.conf.dispatcher_http.microbatching
+        # Settings for batch mode
+        self.batch_mode = self.conf.dispatcher_http.batch_mode
+        if self.batch_mode and HttpDispatcher.batch_timer is None:
+            LOG.debug(_('Set up and run batch mode'))
+            HttpDispatcher.meter_queue = Queue()
+            HttpDispatcher.event_queue = Queue()
+            HttpDispatcher.batch_timer = BatchFlushThread(self.conf.dispatcher_http.batch_count,
+                                                          self.conf.dispatcher_http.batch_timeout,
+                                                          self.conf.dispatcher_http.batch_polling_interval)
+            HttpDispatcher.batch_timer.start()
 
     def record_metering_data(self, data):
         if self.target == '':
@@ -91,15 +123,9 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                         'file'))
             return
 
-        # We may have receive only one counter on the wire
+        # We may have received only one counter on the wire
         if not isinstance(data, list):
             data = [data]
-
-        LOG.debug('Meters to publish: '
-                  '%d ', len(data))
-
-        if self.microbatching:
-            batched_data = []
 
         for meter in data:
             LOG.debug(
@@ -111,10 +137,11 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                  'counter_volume': meter['counter_volume']})
             if publisher_utils.verify_signature(
                     meter, self.conf.publisher.telemetry_secret):
-                if self.microbatching:
-                    batched_data.append(meter)
+                if self.batch_mode:
+                    LOG.debug(_('Adding meter to batch queue'))
+                    HttpDispatcher.meter_queue.put((self, meter))
                 else:
-                    # Every meter should be posted to the target
+                    LOG.debug(_('Posting single meter'))
                     meter_json = json.dumps(meter)
                     self.post_meter_json(meter_json)
             else:
@@ -122,52 +149,42 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     'message signature invalid, discarding message: %r'),
                     meter)
 
-        if self.microbatching:
-            # Every meter should be posted to the target
-            meter_json = json.dumps(batched_data)
-            self.post_meter_json(meter_json)
-
-
     def post_meter_json(self, meter_json):
         try:
-            # Every meter should be posted to the target
             LOG.debug(_('Meter Message: %s '), meter_json)
             res = requests.post(self.target,
                                 data=meter_json,
                                 headers=self.headers,
                                 verify=self.verify_ssl,
                                 timeout=self.timeout)
-            LOG.debug('Meter Message posting finished with status code '
-                      '%d.', res.status_code)
+            LOG.debug(_('Meter Message posting finished with status code %d.'),
+                      res.status_code)
+            res.raise_for_status()
+            return True
         except Exception as err:
-            LOG.exception(_('Failed to record metering data: %s'),
-                          err)
+            error_code = res.status_code if res else 'unknown'
+            LOG.exception(_LE('Status Code: %{code}s. Failed to'
+                              'dispatch event: %{event}s'),
+                          {'code': error_code, 'event': meter_json})
+            return False
 
     def record_events(self, events):
         if not isinstance(events, list):
             events = [events]
 
-        LOG.debug('Events to publish: '
-                  '%d ', len(events))
-
-        if self.microbatching:
-            batched_data = []
-
         for event in events:
             if publisher_utils.verify_signature(
                     event, self.conf.publisher.telemetry_secret):
-                if self.microbatching:
-                    batched_data.append(event)
+                if self.batch_mode:
+                    LOG.debug(_('Adding event to batch queue'))
+                    HttpDispatcher.event_queue.put((self, event))
                 else:
+                    LOG.debug(_('Posting single event'))
                     event_json = json.dumps(event)
                     self.post_event_json(event_json)
             else:
                 LOG.warning(_LW(
                     'event signature invalid, discarding event: %s'), event)
-
-        if self.microbatching:
-            event_json = json.dumps(batched_data)
-            self.post_meter_json(event_json)
 
     def post_event_json(self, event_json):
         res = None
@@ -177,11 +194,87 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                                 headers=self.headers,
                                 verify=self.verify_ssl,
                                 timeout=self.timeout)
-            LOG.debug('Event Message posting finished with status code '
-                      '%d.', res.status_code)
+            LOG.debug(_('Event Message posting finished with status code %d.'),
+                      res.status_code)
             res.raise_for_status()
+            return True
         except Exception:
             error_code = res.status_code if res else 'unknown'
             LOG.exception(_LE('Status Code: %{code}s. Failed to'
                               'dispatch event: %{event}s'),
                           {'code': error_code, 'event': event_json})
+            return False
+
+
+class BatchFlushThread(Thread):
+    def __init__(self, batch_count, batch_timeout, batch_polling_interval):
+        super(BatchFlushThread, self).__init__()
+        self.batch_count = batch_count
+        self.batch_timeout = batch_timeout
+        self.batch_polling_interval = batch_polling_interval
+        self.time_of_last_batch_run = time.time()
+
+    def is_batch_ready(self, queue):
+        """Method to check if batch is ready to be flushed."""
+
+        previous_time = self.time_of_last_batch_run
+        current_time = time.time()
+        elapsed_time = current_time - previous_time
+
+        LOG.debug(_('Elapsed time is %d'), elapsed_time)
+
+        if elapsed_time >= self.batch_timeout and not queue.empty():
+            LOG.debug(_('Batch timeout exceeded, triggering batch publish.'))
+            return True
+        else:
+            if queue.qsize() >= self.batch_count:
+                LOG.debug(_('Batch queue full, triggering batch publish.'))
+                return True
+            else:
+                LOG.debug('Not flushing. Queue size: %d, elapsed time: %d '
+                          , queue.qsize(), elapsed_time)
+                return False
+
+    def run(self):
+        """Method to flush the queued meters & events."""
+        LOG.debug('BatchFlushThread.run called')
+        poster = None
+
+        while True:
+            LOG.debug(_('Check meter queue to see if we are ready to flush a batch'))
+            if self.is_batch_ready(HttpDispatcher.meter_queue):
+                # publish all meters in queue at this point
+                meters = []
+                while not HttpDispatcher.meter_queue.empty():
+                    poster, meter = HttpDispatcher.meter_queue.get()
+                    meters.append(meter)
+
+                if meters:
+                    LOG.debug('Meters to publish in batch: '
+                              '%d ', len(meters))
+                    meter_json = json.dumps(meters)
+                    # If posting failed, requeue the events
+                    if not poster.post_meter_json(meter_json):
+                        for meter in meters:
+                            HttpDispatcher.meter_queue.put((poster, meter))
+
+            LOG.debug(_('Check event queue to see if we are ready to flush a batch'))
+            if self.is_batch_ready(HttpDispatcher.event_queue):
+                # publish all events in queue at this point
+                events = []
+                while not HttpDispatcher.event_queue.empty():
+                    poster, event = HttpDispatcher.event_queue.get()
+                    events.append(event)
+
+                if events:
+                    LOG.debug('Events to publish in batch: '
+                              '%d ', len(events))
+                    event_json = json.dumps(events)
+                    # If posting failed, requeue the events
+                    if not poster.post_event_json(event_json):
+                        for event in events:
+                            HttpDispatcher.event_queue.put((poster, event))
+
+                self.time_of_last_batch_run = time.time()
+
+            time.sleep(self.batch_polling_interval)
