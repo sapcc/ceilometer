@@ -103,4 +103,6 @@ class FilePublisher(publisher.PublisherBase):
         :param context: Execution context from the service or RPC call
         :param events: events from pipeline after transformation
         """
-        raise ceilometer.NotImplementedError
+        if self.publisher_logger:
+            for event in events:
+                self.publisher_logger.info(event.as_dict())
