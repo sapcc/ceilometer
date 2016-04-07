@@ -108,8 +108,12 @@ msgstr ""
 msgid "Failed to load resource due to error %s"
 msgstr ""
 
-#: ceilometer/dispatcher/http.py:126
-msgid "Status Code: %{code}s. Failed todispatch event: %{event}s"
+#: ceilometer/dispatcher/http.py:172
+msgid "Status Code: %{code}s. Failed to dispatch meter: %{meter}s"
+msgstr ""
+
+#: ceilometer/dispatcher/http.py:209
+msgid "Status Code: %{code}s. Failed to dispatch event: %{event}s"
 msgstr ""
 
 #: ceilometer/event/endpoint.py:69

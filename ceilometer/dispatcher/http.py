@@ -154,21 +154,24 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
 
     def post_meter_json(self, meter_json):
         try:
-            LOG.debug(_('Meter Message: %s '), meter_json)
+            LOG.debug('Meter Message: %s ', meter_json)
             res = requests.post(self.target,
                                 data=meter_json,
                                 headers=self.headers,
                                 verify=self.verify_ssl,
                                 timeout=self.timeout)
-            LOG.debug(_('Meter Message posting finished with status code %d.'),
-                      res.status_code)
+            LOG.debug('Meter Message posting to %s: status code %d.',
+                      self.target, res.status_code)
             res.raise_for_status()
             return True
         except Exception:
-            error_code = res.status_code if res else 'unknown'
-            LOG.exception(_LE('Status Code: %{code}s. Failed to'
-                              'dispatch event: %{event}s'),
-                          {'code': error_code, 'event': meter_json})
+            try:
+                error_code = res.status_code if res else 'unknown'
+            except UnboundLocalError:
+                error_code = 'unknown'
+            LOG.exception(_LE('Status Code: %s. Failed to '
+                              'dispatch meter: %s'),
+                          error_code, meter_json)
             return False
 
     def record_events(self, events):
@@ -192,20 +195,20 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
     def post_event_json(self, event_json):
         res = None
         try:
-            LOG.debug(_('Event Message: %s '), event_json)
+            LOG.debug('Event Message: %s ', event_json)
             res = requests.post(self.event_target, data=event_json,
                                 headers=self.headers,
                                 verify=self.verify_ssl,
                                 timeout=self.timeout)
-            LOG.debug(_('Event Message posting finished with status code %d.'),
-                      res.status_code)
+            LOG.debug('Event Message posting to %s: status code %d.',
+                      self.event_target, res.status_code)
             res.raise_for_status()
             return True
         except Exception:
             error_code = res.status_code if res else 'unknown'
-            LOG.exception(_LE('Status Code: %{code}s. Failed to'
-                              'dispatch event: %{event}s'),
-                          {'code': error_code, 'event': event_json})
+            LOG.exception(_LE('Status Code: %s. '
+                              'Failed to dispatch event: %s'),
+                            error_code,event_json)
             return False
 
 
