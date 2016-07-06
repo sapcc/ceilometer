@@ -15,8 +15,10 @@
 import json
 import time
 
+import datetime
 from oslo_config import cfg
 from oslo_log import log
+from Queue import PriorityQueue
 from Queue import Queue
 import requests
 from threading import Thread
@@ -108,8 +110,10 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         self.batch_mode = self.conf.dispatcher_http.batch_mode
         if self.batch_mode and HttpDispatcher.batch_timer is None:
             LOG.debug(_('Set up and run batch mode'))
-            HttpDispatcher.meter_queue = Queue()
-            HttpDispatcher.event_queue = Queue()
+            # Use a priority queue with timestamp as priority to preserve
+            #  ordering when we requeue failed sending attempts
+            HttpDispatcher.meter_queue = PriorityQueue()
+            HttpDispatcher.event_queue = PriorityQueue()
             HttpDispatcher.batch_timer = BatchFlushThread(
                 self.conf.dispatcher_http.batch_count,
                 self.conf.dispatcher_http.batch_timeout,
@@ -140,7 +144,8 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     meter, self.conf.publisher.telemetry_secret):
                 if self.batch_mode:
                     LOG.debug(_('Adding meter to batch queue'))
-                    HttpDispatcher.meter_queue.put((self, meter))
+                    HttpDispatcher.meter_queue.put(
+                        (datetime.utcnow(), self, meter))
                 else:
                     LOG.debug(_('Posting single meter'))
                     meter_json = json.dumps(meter)
@@ -171,9 +176,9 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     error_code = 'unknown'
             except UnboundLocalError:
                 error_code = 'unknown'
-            LOG.exception(_LE('Status Code: %s. Failed to '
-                              'dispatch meter: %s'),
-                          error_code, meter_json)
+            LOG.exception(_LE('Status Code: %(code)s. '
+                              'Failed to dispatch meter: %(meter)s') %
+                          {'code': error_code, 'event': meter_json})
             return False
 
     def record_events(self, events):
@@ -185,7 +190,8 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     event, self.conf.publisher.telemetry_secret):
                 if self.batch_mode:
                     LOG.debug(_('Adding event to batch queue'))
-                    HttpDispatcher.event_queue.put((self, event))
+                    HttpDispatcher.event_queue.put(
+                        (datetime.utcnow(), self, event))
                 else:
                     LOG.debug(_('Posting single event'))
                     event_json = json.dumps(event)
@@ -212,9 +218,9 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
             else:
                 error_code = 'unknown'
 
-            LOG.exception(_LE('Status Code: %s. '
-                          'Failed to dispatch event: %s'),
-                          error_code, event_json)
+            LOG.exception(_LE('Status Code: %(code)s. '
+                          'Failed to dispatch event: %(event)s') %
+                          {'code': error_code, 'event': event_json})
             return False
 
 
@@ -257,29 +263,37 @@ class BatchFlushThread(Thread):
             LOG.debug(
                 _('Check meter queue to see if we are ready to flush a batch'))
             if self.is_batch_ready(HttpDispatcher.meter_queue):
-                # publish all meters in queue at this point
+                # publish all meters in queue at this point, up to a maximum
+                #  of batch_count
                 meters = []
-                while not HttpDispatcher.meter_queue.empty():
-                    poster, meter = HttpDispatcher.meter_queue.get()
+                retryQueue = Queue()
+                while not HttpDispatcher.meter_queue.empty() and \
+                        meters.len < self.batch_count:
+                    timestamp, poster, meter = HttpDispatcher.meter_queue.get()
                     meters.append(meter)
+                    retryQueue.put((timestamp, poster, meter))
 
                 if meters:
                     LOG.debug('Meters to publish in batch: '
                               '%d ', len(meters))
                     meter_json = json.dumps(meters)
-                    # If posting failed, requeue the events
+                    # If posting failed, requeue the meters
                     if not poster.post_meter_json(meter_json):
-                        for meter in meters:
-                            HttpDispatcher.meter_queue.put((poster, meter))
+                        while not retryQueue.empty():
+                            HttpDispatcher.meter_queue.put(retryQueue.get())
 
             LOG.debug(
                 _('Check event queue to see if we are ready to flush a batch'))
             if self.is_batch_ready(HttpDispatcher.event_queue):
-                # publish all events in queue at this point
+                # publish all events in queue at this point, up to a maximum
+                #  of batch_count
                 events = []
-                while not HttpDispatcher.event_queue.empty():
-                    poster, event = HttpDispatcher.event_queue.get()
+                retryQueue = Queue()
+                while not HttpDispatcher.event_queue.empty() and \
+                        events.len < self.batch_count:
+                    timestamp, poster, event = HttpDispatcher.event_queue.get()
                     events.append(event)
+                    retryQueue.put((timestamp, poster, event))
 
                 if events:
                     LOG.debug('Events to publish in batch: '
@@ -287,8 +301,8 @@ class BatchFlushThread(Thread):
                     event_json = json.dumps(events)
                     # If posting failed, requeue the events
                     if not poster.post_event_json(event_json):
-                        for event in events:
-                            HttpDispatcher.event_queue.put((poster, event))
+                        while not retryQueue.empty():
+                            HttpDispatcher.event_queue.put(retryQueue.get())
 
                 self.time_of_last_batch_run = time.time()
 
