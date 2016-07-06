@@ -426,7 +426,9 @@ class AgentManager(service_base.BaseService):
         return (s.scheme or s.path), (s.netloc + s.path if s.scheme else None)
 
     def _discoverer(self, name):
+        LOG.debug("Looking up name %s in discovery_manager", name)
         for d in self.discovery_manager:
+            LOG.debug("Checking discovery manager name %s", d.name)
             if d.name == name:
                 return d.obj
         return None
@@ -439,6 +441,7 @@ class AgentManager(service_base.BaseService):
                 resources.extend(discovery_cache[url])
                 continue
             name, param = self._parse_discoverer(url)
+            LOG.debug("Parsed URL %s to discoverer name %s", url, name)
             discoverer = self._discoverer(name)
             if discoverer:
                 try:
