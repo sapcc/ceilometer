@@ -151,6 +151,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                     meter)
 
     def post_meter_json(self, meter_json):
+        res = None
         try:
             LOG.debug('Meter Message: %s ', meter_json)
             res = requests.post(self.target,
