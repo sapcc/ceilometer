@@ -23,6 +23,7 @@ from oslo_log import log
 from oslo_utils import timeutils
 import six.moves.urllib.parse as urlparse
 from swiftclient import client as swift
+from swiftclient.exceptions import ClientException
 
 from ceilometer.agent import plugin_base
 from ceilometer import keystone_client
@@ -90,9 +91,15 @@ class _Base(plugin_base.PollsterBase):
 
         for t in tenants:
             api_method = '%s_account' % self.METHOD
-            yield (t.id, getattr(swift, api_method)
-                                (self._neaten_url(endpoint, t.id),
-                                 keystone_client.get_auth_token(ksclient)))
+            try:
+                yield (t.id, getattr(swift, api_method)
+                       (self._neaten_url(endpoint, t.id),
+                        keystone_client.get_auth_token(ksclient)))
+            except ClientException as e:
+                if e.http_status == 404:
+                    LOG.warning("Swift tenant id %s not found.", t.id)
+                else:
+                    raise e
 
     @staticmethod
     def _neaten_url(endpoint, tenant_id):

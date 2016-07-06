@@ -15,8 +15,6 @@
 import json
 import time
 
-from threading import Thread
-from Queue import Queue
 from oslo_config import cfg
 from oslo_log import log
 from Queue import Queue
@@ -207,8 +205,8 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         except Exception:
             error_code = res.status_code if res else 'unknown'
             LOG.exception(_LE('Status Code: %s. '
-                              'Failed to dispatch event: %s'),
-                            error_code,event_json)
+                          'Failed to dispatch event: %s'),
+                          error_code, event_json)
             return False
 
 
