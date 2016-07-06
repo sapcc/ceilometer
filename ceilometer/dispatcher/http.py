@@ -164,7 +164,10 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
             return True
         except Exception:
             try:
-                error_code = res.status_code if res else 'unknown'
+                if res:
+                    error_code = res.status_code
+                else:
+                    error_code = 'unknown'
             except UnboundLocalError:
                 error_code = 'unknown'
             LOG.exception(_LE('Status Code: %s. Failed to '
@@ -203,7 +206,11 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
             res.raise_for_status()
             return True
         except Exception:
-            error_code = res.status_code if res else 'unknown'
+            if res:
+                error_code = res.status_code
+            else:
+                error_code = 'unknown'
+
             LOG.exception(_LE('Status Code: %s. '
                           'Failed to dispatch event: %s'),
                           error_code, event_json)
