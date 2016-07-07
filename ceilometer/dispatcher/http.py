@@ -191,7 +191,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                 if self.batch_mode:
                     LOG.debug(_('Adding event to batch queue'))
                     HttpDispatcher.event_queue.put(
-                        (datetime.utcnow(), self, event))
+                        (datetime.datetime.utcnow(), self, event))
                 else:
                     LOG.debug(_('Posting single event'))
                     event_json = json.dumps(event)
