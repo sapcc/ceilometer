@@ -145,7 +145,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
                 if self.batch_mode:
                     LOG.debug(_('Adding meter to batch queue'))
                     HttpDispatcher.meter_queue.put(
-                        (datetime.utcnow(), self, meter))
+                        (datetime.datetime.utcnow(), self, meter))
                 else:
                     LOG.debug(_('Posting single meter'))
                     meter_json = json.dumps(meter)
