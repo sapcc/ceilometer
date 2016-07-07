@@ -268,7 +268,7 @@ class BatchFlushThread(Thread):
                 meters = []
                 retryQueue = Queue()
                 while not HttpDispatcher.meter_queue.empty() and \
-                        meters.len < self.batch_count:
+                        len(meters) < self.batch_count:
                     timestamp, poster, meter = HttpDispatcher.meter_queue.get()
                     meters.append(meter)
                     retryQueue.put((timestamp, poster, meter))
@@ -290,7 +290,7 @@ class BatchFlushThread(Thread):
                 events = []
                 retryQueue = Queue()
                 while not HttpDispatcher.event_queue.empty() and \
-                        events.len < self.batch_count:
+                        len(events) < self.batch_count:
                     timestamp, poster, event = HttpDispatcher.event_queue.get()
                     events.append(event)
                     retryQueue.put((timestamp, poster, event))
