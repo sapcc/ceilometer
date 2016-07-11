@@ -18,12 +18,14 @@ import uuid
 
 import mock
 from oslo_config import fixture as fixture_config
+from oslo_log import log as logging
 from oslotest import base
 import requests
 
 from ceilometer.dispatcher import http
 from ceilometer.event.storage import models as event_models
 from ceilometer.publisher import utils
+from threading import Event
 
 
 class TestDispatcherHttp(base.BaseTestCase):
@@ -70,6 +72,26 @@ class TestDispatcherHttp(base.BaseTestCase):
 
         self.assertEqual(1, post.call_count)
 
+    def test_http_dispatcher_background(self):
+        logging.register_options(self.CONF)
+        logging.set_defaults(logging.get_default_log_levels() +
+                             ['dispatcher.http=DEBUG'])
+        logging.setup(self.CONF, None)
+        self.CONF.dispatcher_http.target = 'fake'
+        self.CONF.dispatcher_http.batch_mode = True
+        self.CONF.dispatcher_http.batch_count = 1
+        self.CONF.dispatcher_http.batch_polling_interval = 1
+        self.CONF.dispatcher_http.batch_polling_timeout = 1
+        posted = Event()
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        with mock.patch('requests.post',
+                        side_effect=lambda *args, **kwargs: posted.set()
+                        ) as post:
+            dispatcher.record_metering_data(self.msg)
+            posted.wait(5)
+            self.assertEqual(1, post.call_count)
+
 
 class TestEventDispatcherHttp(base.BaseTestCase):
 
@@ -91,6 +113,28 @@ class TestEventDispatcherHttp(base.BaseTestCase):
             dispatcher.record_events(event)
 
         self.assertEqual(1, post.call_count)
+
+    def test_http_dispatcher_background_event(self):
+        self.CONF.dispatcher_http.event_target = 'fake'
+        self.CONF.dispatcher_http.batch_mode = True
+        self.CONF.dispatcher_http.batch_count = 1
+        self.CONF.dispatcher_http.batch_polling_interval = 1
+        self.CONF.dispatcher_http.batch_polling_timeout = 1
+        posted = Event()
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        event = event_models.Event(repr(uuid.uuid4()), 'test',
+                                   datetime.datetime(2012, 7, 2, 13, 53, 40),
+                                   [], {})
+        event = utils.message_from_event(event,
+                                         self.CONF.publisher.telemetry_secret)
+
+        with mock.patch('requests.post',
+                        side_effect=lambda *args, **kwargs: posted.set()
+                        ) as post:
+            dispatcher.record_events(event)
+            posted.wait(5)
+            self.assertEqual(1, post.call_count)
 
     def test_http_dispatcher_bad(self):
         self.CONF.dispatcher_http.event_target = ''
