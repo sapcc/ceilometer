@@ -119,6 +119,46 @@ class TestDispatcherHttp(base.BaseTestCase):
 
         self.assertEqual('/path/to/cert.crt', post.call_args[1]['verify'])
 
+    def test_http_dispatcher_with_basic_auth(self):
+        self.CONF.dispatcher_http.target = 'https://example.com'
+        self.CONF.dispatcher_http.target_username = 'alice'
+        self.CONF.dispatcher_http.target_password = 'W0nd3r!4nd'
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        self.assertEqual(('alice', 'W0nd3r!4nd'), dispatcher.target_auth)
+
+        with mock.patch.object(requests, 'post') as post:
+            dispatcher.record_metering_data(self.msg)
+
+        self.assertEqual(('alice', 'W0nd3r!4nd'), post.call_args[1]['auth'])
+
+    def test_http_dispatcher_with_cert_auth(self):
+        self.CONF.dispatcher_http.target = 'https://example.com'
+        self.CONF.dispatcher_http.target_clientcert = '/path/to/cert.crt'
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        self.assertEqual('/path/to/cert.crt', dispatcher.target_auth_cert)
+
+        with mock.patch.object(requests, 'post') as post:
+            dispatcher.record_metering_data(self.msg)
+
+        self.assertEqual('/path/to/cert.crt', post.call_args[1]['cert'])
+
+    def test_http_dispatcher_with_cert_key_auth(self):
+        self.CONF.dispatcher_http.target = 'https://example.com'
+        self.CONF.dispatcher_http.target_clientcert = '/path/to/cert.crt'
+        self.CONF.dispatcher_http.target_clientkey = '/path/to/cert.key'
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        self.assertEqual(('/path/to/cert.crt', '/path/to/cert.key'),
+                         dispatcher.target_auth_cert)
+
+        with mock.patch.object(requests, 'post') as post:
+            dispatcher.record_metering_data(self.msg)
+
+        self.assertEqual(('/path/to/cert.crt', '/path/to/cert.key'),
+                         post.call_args[1]['cert'])
+
     def test_http_dispatcher_non_batch(self):
         self.CONF.dispatcher_http.target = 'fake'
         self.CONF.dispatcher_http.batch_mode = False
@@ -140,6 +180,7 @@ class TestDispatcherHttp(base.BaseTestCase):
 
 class TestEventDispatcherHttp(base.BaseTestCase):
     """Test sending events with the http dispatcher"""
+
     def setUp(self):
         super(TestEventDispatcherHttp, self).setUp()
         self.CONF = self.useFixture(fixture_config.Config()).conf
@@ -209,6 +250,47 @@ class TestEventDispatcherHttp(base.BaseTestCase):
             dispatcher.record_events(self.event)
 
         self.assertEqual('/path/to/cert.crt', post.call_args[1]['verify'])
+
+    def test_http_dispatcher_with_basic_auth(self):
+        self.CONF.dispatcher_http.event_target = 'https://example.com'
+        self.CONF.dispatcher_http.event_target_username = 'alice'
+        self.CONF.dispatcher_http.event_target_password = 'W0nd3r!4nd'
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        self.assertEqual(('alice', 'W0nd3r!4nd'), dispatcher.event_target_auth)
+
+        with mock.patch.object(requests, 'post') as post:
+            dispatcher.record_events(self.event)
+
+        self.assertEqual(('alice', 'W0nd3r!4nd'), post.call_args[1]['auth'])
+
+    def test_http_dispatcher_with_cert_auth(self):
+        self.CONF.dispatcher_http.event_target = 'https://example.com'
+        self.CONF.dispatcher_http.event_target_clientcert = '/path/to/cert.crt'
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        self.assertEqual('/path/to/cert.crt',
+                         dispatcher.event_target_auth_cert)
+
+        with mock.patch.object(requests, 'post') as post:
+            dispatcher.record_events(self.event)
+
+        self.assertEqual('/path/to/cert.crt', post.call_args[1]['cert'])
+
+    def test_http_dispatcher_with_cert_key_auth(self):
+        self.CONF.dispatcher_http.event_target = 'https://example.com'
+        self.CONF.dispatcher_http.event_target_clientcert = '/path/to/cert.crt'
+        self.CONF.dispatcher_http.event_target_clientkey = '/path/to/cert.key'
+        dispatcher = http.HttpDispatcher(self.CONF)
+
+        self.assertEqual(('/path/to/cert.crt', '/path/to/cert.key'),
+                         dispatcher.event_target_auth_cert)
+
+        with mock.patch.object(requests, 'post') as post:
+            dispatcher.record_events(self.event)
+
+        self.assertEqual(('/path/to/cert.crt', '/path/to/cert.key'),
+                         post.call_args[1]['cert'])
 
     def test_http_dispatcher_nonbatch_event(self):
         self.CONF.dispatcher_http.event_target = 'fake'
