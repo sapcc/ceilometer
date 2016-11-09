@@ -27,13 +27,52 @@ LOG = log.getLogger(__name__)
 http_dispatcher_opts = [
     cfg.StrOpt('target',
                default='',
-               help='The target where the http request will be sent. '
-                    'If this is not set, no data will be posted. For '
-                    'example: target = http://hostname:1234/path'),
+               help='The target where the http request will be sent. If this '
+                    'is not set, no data will be posted. For example: target '
+                    '= http://hostname:1234/path'),
+    cfg.StrOpt('target_username',
+               default='',
+               help='If the target requires Basic authentication, this is the '
+                    'username to use'),
+    cfg.StrOpt('target_password',
+               default='',
+               help='If the target requires Basic authentication, this is the '
+                    'password to use'),
+    cfg.StrOpt('target_clientcert',
+               default='',
+               help='If the target requires client certificate authentication,'
+                    ' this is the path to the certificate file'),
+    cfg.StrOpt('target_clientkey',
+               default='',
+               help='If the target requires client certificate '
+                    'authentication and target_clientcert does not already  '
+                    'contain the key, this is the path to the key file'),
     cfg.StrOpt('event_target',
-               help='The target for event data where the http request '
-                    'will be sent to. If this is not set, it will default '
-                    'to same as Sample target.'),
+               help='The target for event data where the http request will be '
+                    'sent to. If this is not set, it will default to the same '
+                    'as for \'target\'.'),
+    cfg.StrOpt('event_target_username',
+               default='',
+               help='If the event target requires Basic authentication, '
+                    'this is the username to use. If this is not set, it will '
+                    'default to same as for \'target\'.'),
+    cfg.StrOpt('event_target_password',
+               default='',
+               help='If the event target requires Basic authentication, '
+                    'this is the password to use. If this is not set, it will '
+                    'default to same as for \'target\'.'),
+    cfg.StrOpt('event_target_clientcert',
+               default='',
+               help='If the target requires client certificate '
+                    'authentication, this is the path to the certificate '
+                    'file. If this is not set, it will default to the same as '
+                    'for \'target\'.'),
+    cfg.StrOpt('event_target_clientkey',
+               default='',
+               help='If the target requires client certificate authentication '
+                    'and event_target_clientcert does not already contain the '
+                    'key, this is the path to the key file. If this is not '
+                    'set, it will default to the same as for \'target\'.'),
     cfg.IntOpt('timeout',
                default=5,
                help='The max time in seconds to wait for a request to '
@@ -65,7 +104,15 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
 
         [dispatcher_http]
         target = www.example.com
+        #target_username = username
+        #target_password = password
+        #target_clientcert = /path/to/cert_or_pem
+        #target_clientkey = /path/to/key
         event_target = www.example.com
+        #event_target_username = username
+        #event_target_password = password
+        #event_target_clientcert = /path/to/cert_or_pem
+        #event_target_clientkey = /path/to/key
         timeout = 2
         # No SSL verification
         #verify_ssl = False
@@ -83,13 +130,52 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
 
     def __init__(self, conf):
         super(HttpDispatcher, self).__init__(conf)
+        _conf = self.conf.dispatcher_http
         self.headers = {'Content-type': 'application/json'}
-        self.timeout = self.conf.dispatcher_http.timeout
-        self.target = self.conf.dispatcher_http.target
-        self.event_target = (self.conf.dispatcher_http.event_target or
-                             self.target)
+        self.timeout = _conf.timeout
 
-        if self.conf.dispatcher_http.batch_mode:
+        self.target = _conf.target
+        # Username/password authentication for target
+        target_user = _conf.target_username
+        target_pass = _conf.target_password
+        if target_user:
+            self.target_auth = (target_user, target_pass)
+        else:
+            self.target_auth = None
+        # Certificate authentication for target
+        target_clientcert = _conf.target_clientcert
+        target_clientkey = _conf.target_clientkey
+        if target_clientcert:
+            if target_clientkey:
+                self.target_auth_cert = (target_clientcert, target_clientkey)
+            else:
+                self.target_auth_cert = target_clientcert
+        else:
+            self.target_auth_cert = None
+
+        self.event_target = (_conf.event_target or self.target)
+        # Username/password authentication for event target
+        event_target_user = _conf.event_target_username or target_user
+        event_target_pass = _conf.event_target_password or target_pass
+        if event_target_user:
+            self.event_target_auth = (event_target_user, event_target_pass)
+        else:
+            self.event_target_auth = None
+        # Certificate authentication for event target
+        event_target_clientcert = (_conf.event_target_clientcert or
+                                   target_clientcert)
+        event_target_clientkey = (_conf.event_target_clientkey or
+                                  target_clientkey)
+        if event_target_clientcert:
+            if event_target_clientkey:
+                self.event_target_auth_cert = (event_target_clientcert,
+                                               event_target_clientkey)
+            else:
+                self.event_target_auth_cert = event_target_clientcert
+        else:
+            self.event_target_auth_cert = None
+
+        if _conf.batch_mode:
             self.post_event_data = self.post_event
             self.post_meter_data = self.post_meter
         else:
@@ -98,9 +184,9 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
 
         try:
             self.verify_ssl = strutils.bool_from_string(
-                self.conf.dispatcher_http.verify_ssl, strict=True)
+                _conf.verify_ssl, strict=True)
         except ValueError:
-            self.verify_ssl = self.conf.dispatcher_http.verify_ssl or True
+            self.verify_ssl = _conf.verify_ssl or True
 
     def record_metering_data(self, data):
         if self.target == '':
@@ -127,6 +213,8 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
             LOG.trace('Meter Message: %s', meter_json)
             res = requests.post(self.target,
                                 data=meter_json,
+                                auth=self.target_auth,
+                                cert=self.target_auth_cert,
                                 headers=self.headers,
                                 verify=self.verify_ssl,
                                 timeout=self.timeout)
@@ -163,6 +251,8 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
             LOG.trace('Event Message: %s', event_json)
             res = requests.post(self.event_target,
                                 data=event_json,
+                                auth=self.event_target_auth,
+                                cert=self.event_target_auth_cert,
                                 headers=self.headers,
                                 verify=self.verify_ssl,
                                 timeout=self.timeout)
