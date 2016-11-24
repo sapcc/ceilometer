@@ -211,6 +211,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         res = None
         try:
             LOG.trace('Meter Message: %s', meter_json)
+            LOG.debug('cert: %s',self.target_auth_cert)
             res = requests.post(self.target,
                                 data=meter_json,
                                 auth=self.target_auth,
@@ -249,6 +250,7 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         try:
             event_json = json.dumps(event)
             LOG.trace('Event Message: %s', event_json)
+            LOG.debug('cert: %s',self.event_target_auth_cert)
             res = requests.post(self.event_target,
                                 data=event_json,
                                 auth=self.event_target_auth,
