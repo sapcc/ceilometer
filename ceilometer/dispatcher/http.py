@@ -144,7 +144,11 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
             self.target_auth = None
         # Certificate authentication for target
         target_clientcert = _conf.target_clientcert
+        if target_clientcert=='None':
+            target_clientcert = None
         target_clientkey = _conf.target_clientkey
+        if target_clientkey=='None':
+            target_clientkey = None
         if target_clientcert:
             if target_clientkey:
                 self.target_auth_cert = (target_clientcert, target_clientkey)
@@ -164,8 +168,12 @@ class HttpDispatcher(dispatcher.MeterDispatcherBase,
         # Certificate authentication for event target
         event_target_clientcert = (_conf.event_target_clientcert or
                                    target_clientcert)
+        if event_target_clientcert == 'None':
+            event_target_clientcert = None
         event_target_clientkey = (_conf.event_target_clientkey or
                                   target_clientkey)
+        if event_target_clientkey == 'None':
+            event_target_clientkey = None
         if event_target_clientcert:
             if event_target_clientkey:
                 self.event_target_auth_cert = (event_target_clientcert,
