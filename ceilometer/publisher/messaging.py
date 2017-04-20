@@ -177,6 +177,8 @@ class MessagingPublisher(publisher.ConfigPublisherBase):
             event, self.conf.publisher.telemetry_secret) for event in events]
 
         topic = self.conf.publisher_notifier.event_topic
+        LOG.debug('Publishing %(m)d events on %(n)s',
+                  {'m': len(ev_list), 'n': topic})
         self.local_queue.append((topic, ev_list))
         self.flush()
 
