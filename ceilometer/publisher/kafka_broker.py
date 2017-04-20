@@ -94,6 +94,7 @@ class KafkaBrokerPublisher(messaging.MessagingPublisher):
         # application...
         try:
             for d in data:
+                LOG.debug("Sending data to kafka://: %s", jsonutils.dumps(d))
                 self._producer.send(self._topic, jsonutils.dumps(d))
         except Exception as e:
             messaging.raise_delivery_failure(e)

@@ -207,6 +207,7 @@ class NotifierPublisher(MessagingPublisher):
 
     def _send(self, event_type, data):
         try:
+            LOG.debug("Sending data to notifier://: %s", data)
             self.notifier.sample({}, event_type=event_type,
                                  payload=data)
         except oslo_messaging.MessageDeliveryFailure as e:
